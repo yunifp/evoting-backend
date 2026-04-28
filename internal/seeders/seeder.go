@@ -7,15 +7,17 @@ import (
 	"gorm.io/gorm"
 )
 
-// RunSeeder dipanggil dari main.go untuk memastikan data esensial ada
 func RunSeeder(db *gorm.DB) {
-	log.Println("Menjalankan Seeder...")
+	log.Println("Memulai proses Seeder...")
+	
 	SeedRoles(db)
 	SeedMenusAndPermissions(db)
-	log.Println("Seeder Selesai!")
+	SeedRolePermissions(db) // Tambahkan ini agar hak akses terhubung ke role
+	SeedDummyData(db)
+
+	log.Println("Seluruh Seeder Selesai!")
 }
 
-// 1. Seed Roles Dasar
 func SeedRoles(db *gorm.DB) {
 	roles := []models.Role{
 		{Name: "Superadmin", Description: "Akses penuh sistem tak terbatas"},
@@ -30,9 +32,7 @@ func SeedRoles(db *gorm.DB) {
 	}
 }
 
-// 2. Seed Menus & Permissions secara Presisi
 func SeedMenusAndPermissions(db *gorm.DB) {
-	// Definisi struktur menu dan permission yang 100% presisi untuk RBAC kita
 	menusData := []struct {
 		Menu  models.Menu
 		Perms []models.Permission
@@ -101,24 +101,52 @@ func SeedMenusAndPermissions(db *gorm.DB) {
 
 	for _, item := range menusData {
 		var menu models.Menu
-		// Buat menu jika belum ada berdasarkan namanya
 		if err := db.Where("name = ?", item.Menu.Name).FirstOrCreate(&menu, item.Menu).Error; err != nil {
 			log.Printf("Gagal seed menu %s: %v", item.Menu.Name, err)
 			continue
 		}
-
-		// Update path & icon untuk berjaga-jaga jika ada perubahan
 		db.Model(&menu).Updates(item.Menu)
 
-		// Buat permission untuk menu tersebut
 		for _, p := range item.Perms {
 			p.MenuID = menu.ID
 			var perm models.Permission
-			// Cari berdasarkan menu_id dan action
 			db.Where("menu_id = ? AND action = ?", menu.ID, p.Action).FirstOrCreate(&perm, p)
-			
-			// Update nama permission agar rapi
 			db.Model(&perm).Updates(p)
 		}
 	}
+}
+
+// SeedRolePermissions menghubungkan Role dengan Hak Aksesnya
+func SeedRolePermissions(db *gorm.DB) {
+	log.Println("Menghubungkan Role dan Permission...")
+
+	var adminRole models.Role
+	db.Where("name = ?", "Admin").First(&adminRole)
+
+	// Kita beri role Admin semua permission yang ada di database
+	// agar dia bisa mengelola sistem (kecuali jika Anda ingin membatasi tertentu)
+	var allPermissions []models.Permission
+	db.Find(&allPermissions)
+
+	if adminRole.ID != 0 {
+		// Gunakan Association Replace agar data tidak duplikat jika di-run berkali-kali
+		db.Model(&adminRole).Association("Permissions").Replace(allPermissions)
+	}
+
+	// Untuk Superadmin tidak wajib di-seed di pivot karena sudah ada bypass hardcode 
+	// di rbac_middleware.go, tapi bagus untuk integritas data jika ingin dimasukkan juga.
+}
+
+func ClearDatabase(db *gorm.DB) {
+	log.Println("Membersihkan tabel database...")
+	db.Exec("SET FOREIGN_KEY_CHECKS = 0;")
+	tables := []string{
+		"dpts", "kandidats", "pemilus", "transactions", "layanans",
+		"user_roles", "users", "role_permissions", "roles", "permissions", "menus",
+	}
+	for _, table := range tables {
+		db.Exec("TRUNCATE TABLE " + table)
+	}
+	db.Exec("SET FOREIGN_KEY_CHECKS = 1;")
+	log.Println("Database berhasil dibersihkan!")
 }

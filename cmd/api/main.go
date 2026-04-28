@@ -16,6 +16,7 @@ import (
 func main() {
 	config.ConnectDatabase()
 	seeders.RunSeeder(config.DB)
+	seeders.SeedDummyData(config.DB)
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
