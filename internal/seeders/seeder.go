@@ -14,6 +14,7 @@ func RunSeeder(db *gorm.DB) {
 	SeedMenusAndPermissions(db)
 	SeedRolePermissions(db) // Tambahkan ini agar hak akses terhubung ke role
 	SeedDummyData(db)
+	SeedSettings(db)
 
 	log.Println("Seluruh Seeder Selesai!")
 }

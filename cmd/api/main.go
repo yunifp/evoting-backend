@@ -1,3 +1,4 @@
+// cmd/api/main.go
 package main
 
 import (
@@ -17,7 +18,6 @@ func main() {
 	config.ConnectDatabase()
 	seeders.RunSeeder(config.DB)
 	seeders.SeedDummyData(config.DB)
-	seeders.SeedLayanan(config.DB)
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{

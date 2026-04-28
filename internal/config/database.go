@@ -1,3 +1,4 @@
+// internal/config/database.go
 package config
 
 import (
@@ -40,14 +41,15 @@ func ConnectDatabase() {
 		&models.Menu{},
 		&models.Permission{},
 		&models.Role{},
-		&models.RolePermission{}, 
+		&models.RolePermission{},
 		&models.User{},
-		&models.UserRole{},     
-		&models.Layanan{},  
+		&models.UserRole{},
+		&models.Layanan{},
 		&models.Transaction{},
-		&models.Pemilu{},   
+		&models.Pemilu{},
 		&models.Kandidat{},
 		&models.DPT{},
+		&models.Setting{},
 	)
 	if err != nil {
 		log.Fatal("Gagal melakukan migrasi database: ", err)

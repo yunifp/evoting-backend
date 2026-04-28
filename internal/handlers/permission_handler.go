@@ -22,6 +22,7 @@ func GetPermissions(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
 	search := c.Query("search")
 	actionFilter := c.Query("action")
+	menuIDFilter := c.Query("menu_id") // ← FIX: tambahkan ini
 
 	offset := (page - 1) * limit
 	var permissions []models.Permission
@@ -35,6 +36,11 @@ func GetPermissions(c *gin.Context) {
 
 	if actionFilter != "" {
 		query = query.Where("action = ?", actionFilter)
+	}
+
+	// ← FIX: tambahkan blok ini
+	if menuIDFilter != "" {
+		query = query.Where("menu_id = ?", menuIDFilter)
 	}
 
 	query.Count(&totalItems)

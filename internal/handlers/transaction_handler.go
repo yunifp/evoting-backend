@@ -1,13 +1,17 @@
+// internal/handlers/transaction_handler.go
 package handlers
 
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/models"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/midtrans/midtrans-go"
+	"github.com/midtrans/midtrans-go/snap"
 )
 
 type CreateTransactionInput struct {
@@ -15,13 +19,7 @@ type CreateTransactionInput struct {
 	PaymentMethod string `json:"payment_method" binding:"required"`
 }
 
-// ==========================================
-// BAGIAN CLIENT (Penyelenggara)
-// ==========================================
-
-// 1. CLIENT Beli Paket
 func CreateTransaction(c *gin.Context) {
-	// Ambil ID Client yang sedang login dari JWT
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User tidak valid"})
@@ -34,23 +32,91 @@ func CreateTransaction(c *gin.Context) {
 		return
 	}
 
-	// Cek apakah Layanan/Paket tersedia dan aktif
 	var layanan models.Layanan
 	if err := config.DB.Where("id = ? AND is_active = ?", input.LayananID, true).First(&layanan).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Layanan tidak ditemukan atau tidak aktif"})
 		return
 	}
 
-	// Buat Transaksi Baru
-	// Catatan: Harga (Amount) diambil langsung dari database Layanan, BUKAN dari input user
-	// untuk mencegah manipulasi harga dari sisi frontend/postman.
+	var user models.User
+	config.DB.Where("id = ?", userID).First(&user)
+
+	transactionID := uuid.New().String()
+
+	if layanan.Price == 0 {
+		now := time.Now()
+		newTransaction := models.Transaction{
+			ID:            transactionID,
+			UserID:        userID.(string),
+			LayananID:     input.LayananID,
+			Amount:        layanan.Price,
+			Status:        "paid",
+			PaymentMethod: "Free",
+			PaidAt:        &now,
+		}
+
+		if err := config.DB.Create(&newTransaction).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membuat transaksi paket gratis"})
+			return
+		}
+
+		c.JSON(http.StatusCreated, gin.H{
+			"message": "Pesanan paket gratis berhasil diaktifkan.",
+			"data":    newTransaction,
+		})
+		return
+	}
+
+	var serverKeySetting models.Setting
+	if err := config.DB.Where("key = ?", "midtrans_server_key").First(&serverKeySetting).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Kredensial Midtrans belum dikonfigurasi"})
+		return
+	}
+
+	var isProductionSetting models.Setting
+	env := midtrans.Sandbox
+	if err := config.DB.Where("key = ?", "midtrans_is_production").First(&isProductionSetting).Error; err == nil {
+		if isProductionSetting.Value == "true" {
+			env = midtrans.Production
+		}
+	}
+
+	var snapClient snap.Client
+	snapClient.New(serverKeySetting.Value, env)
+
+	req := &snap.Request{
+		TransactionDetails: midtrans.TransactionDetails{
+			OrderID:  transactionID,
+			GrossAmt: int64(layanan.Price),
+		},
+		CustomerDetail: &midtrans.CustomerDetails{
+			FName: user.Name,
+			Email: user.Email,
+		},
+		Items: &[]midtrans.ItemDetails{
+			{
+				ID:    fmt.Sprint(layanan.ID),
+				Name:  layanan.Name,
+				Price: int64(layanan.Price),
+				Qty:   1,
+			},
+		},
+	}
+
+	snapResp, err := snapClient.CreateTransaction(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal generate token pembayaran dari Midtrans"})
+		return
+	}
+
 	newTransaction := models.Transaction{
-		ID:            uuid.New().String(),
+		ID:            transactionID,
 		UserID:        userID.(string),
 		LayananID:     input.LayananID,
 		Amount:        layanan.Price,
 		Status:        "pending",
 		PaymentMethod: input.PaymentMethod,
+		SnapToken:     snapResp.Token,
 	}
 
 	if err := config.DB.Create(&newTransaction).Error; err != nil {
@@ -64,7 +130,6 @@ func CreateTransaction(c *gin.Context) {
 	})
 }
 
-// 2. CLIENT Lihat Riwayat Transaksinya Sendiri
 func GetMyTransactions(c *gin.Context) {
 	userID, _ := c.Get("userID")
 
@@ -80,14 +145,8 @@ func GetMyTransactions(c *gin.Context) {
 	})
 }
 
-// ==========================================
-// BAGIAN ADMIN / SUPERADMIN
-// ==========================================
-
-// 3. ADMIN Lihat Semua Transaksi
 func GetAllTransactions(c *gin.Context) {
 	var transactions []models.Transaction
-	// Preload data User pembeli dan Layanannya
 	if err := config.DB.Preload("User").Preload("Layanan").Order("created_at desc").Find(&transactions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data transaksi"})
 		return
@@ -99,7 +158,6 @@ func GetAllTransactions(c *gin.Context) {
 	})
 }
 
-// 4. ADMIN Approve Pembayaran Manual
 func ApproveTransaction(c *gin.Context) {
 	trxID := c.Param("id")
 
