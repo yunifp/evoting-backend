@@ -35,6 +35,8 @@ func main() {
 
 	api := router.Group("/api")
 	{
+		api.POST("/payments/notification", handlers.HandleNotification)
+
 		auth := api.Group("/auth")
 		{
 			auth.POST("/register", handlers.Register)
@@ -57,8 +59,11 @@ func main() {
 			clientGroup.POST("/pemilu", handlers.CreatePemilu)
 			clientGroup.POST("/pemilu/:pemiluId/kandidat", handlers.AddKandidat)
 			clientGroup.DELETE("/kandidat/:id", handlers.DeleteKandidat)
+			clientGroup.GET("/pemilu/:pemiluId", handlers.GetPemiluDetail)
 			clientGroup.POST("/pemilu/:pemiluId/dpt", handlers.AddDPT)
 			clientGroup.GET("/pemilu/:pemiluId/dpt", handlers.GetDPTByPemilu)
+			clientGroup.PATCH("/pemilu/:pemiluId/publish", handlers.PublishPemilu)
+			clientGroup.GET("/settings/midtrans", handlers.GetMidtransConfig)
 		}
 
 		admin := api.Group("/admin")

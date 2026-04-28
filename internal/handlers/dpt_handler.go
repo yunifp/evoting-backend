@@ -3,6 +3,7 @@ package handlers
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/models"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -10,12 +11,11 @@ import (
 )
 
 type DPTInput struct {
-	NIK  string `json:"nik" binding:"required,len=16"` // Wajib 16 digit
+	NIK  string `json:"nik" binding:"required,len=16"` 
 	Nama string `json:"nama" binding:"required"`
 	NoHP string `json:"no_hp" binding:"required"`
 }
 
-// 1. CLIENT: Tambah DPT Satuan
 func AddDPT(c *gin.Context) {
 	clientID, _ := c.Get("userID")
 	pemiluID := c.Param("pemiluId")
@@ -26,14 +26,31 @@ func AddDPT(c *gin.Context) {
 		return
 	}
 
-	// VALIDASI KEAMANAN: Pastikan Client adalah pemilik event pemilu ini
 	var pemilu models.Pemilu
 	if err := config.DB.Where("id = ? AND client_id = ?", pemiluID, clientID).First(&pemilu).Error; err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Event Pemilu tidak ditemukan atau bukan milik Anda"})
 		return
 	}
 
-	// Validasi NIK: NIK tidak boleh ganda di dalam 1 Event Pemilu yang sama
+
+	var latestTrx models.Transaction
+	if err := config.DB.Preload("Layanan").Where("user_id = ? AND status = ?", clientID, "paid").Order("paid_at desc").First(&latestTrx).Error; err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Anda tidak memiliki paket layanan aktif (Lunas)"})
+		return
+	}
+
+	limitDPT := latestTrx.Layanan.LimitDPT
+
+	var countDPT int64
+	config.DB.Model(&models.DPT{}).Where("pemilu_id = ?", pemilu.ID).Count(&countDPT)
+
+	if countDPT >= int64(limitDPT) {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": fmt.Sprintf("Kuota DPT penuh! Batas maksimal paket Anda adalah %d pemilih.", limitDPT),
+		})
+		return
+	}
+
 	var existingDPT models.DPT
 	if err := config.DB.Where("pemilu_id = ? AND nik = ?", pemilu.ID, input.NIK).First(&existingDPT).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "NIK ini sudah terdaftar di daftar pemilih event ini"})

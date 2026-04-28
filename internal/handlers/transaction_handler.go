@@ -1,4 +1,3 @@
-// internal/handlers/transaction_handler.go
 package handlers
 
 import (
@@ -68,14 +67,14 @@ func CreateTransaction(c *gin.Context) {
 	}
 
 	var serverKeySetting models.Setting
-	if err := config.DB.Where("key = ?", "midtrans_server_key").First(&serverKeySetting).Error; err != nil {
+	if err := config.DB.Where("`key` = ?", "midtrans_server_key").First(&serverKeySetting).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Kredensial Midtrans belum dikonfigurasi"})
 		return
 	}
 
 	var isProductionSetting models.Setting
 	env := midtrans.Sandbox
-	if err := config.DB.Where("key = ?", "midtrans_is_production").First(&isProductionSetting).Error; err == nil {
+	if err := config.DB.Where("`key` = ?", "midtrans_is_production").First(&isProductionSetting).Error; err == nil {
 		if isProductionSetting.Value == "true" {
 			env = midtrans.Production
 		}
@@ -185,4 +184,51 @@ func ApproveTransaction(c *gin.Context) {
 		"message": "Pembayaran berhasil diverifikasi. Paket kini aktif untuk client.",
 		"data":    transaction,
 	})
+}
+
+func HandleNotification(c *gin.Context) {
+	var notificationPayload map[string]interface{}
+	if err := c.ShouldBindJSON(&notificationPayload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Payload tidak valid"})
+		return
+	}
+
+	orderID, ok := notificationPayload["order_id"].(string)
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "order_id tidak ditemukan dalam payload"})
+		return
+	}
+
+	transactionStatus, _ := notificationPayload["transaction_status"].(string)
+	fraudStatus, _ := notificationPayload["fraud_status"].(string)
+
+	var transaction models.Transaction
+	if err := config.DB.Where("id = ?", orderID).First(&transaction).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Transaksi tidak ditemukan"})
+		return
+	}
+
+	if transactionStatus == "capture" {
+		if fraudStatus == "accept" {
+			transaction.Status = "paid"
+		}
+	} else if transactionStatus == "settlement" {
+		transaction.Status = "paid"
+	} else if transactionStatus == "deny" || transactionStatus == "expire" || transactionStatus == "cancel" {
+		transaction.Status = "failed"
+	} else if transactionStatus == "pending" {
+		transaction.Status = "pending"
+	}
+
+	if transaction.Status == "paid" && transaction.PaidAt == nil {
+		now := time.Now()
+		transaction.PaidAt = &now
+	}
+
+	if err := config.DB.Save(&transaction).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal memperbarui status transaksi"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Notifikasi berhasil diproses dan status telah diperbarui"})
 }
