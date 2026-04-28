@@ -3,23 +3,23 @@ package handlers
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/models"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
 func GetMyMenus(c *gin.Context) {
-	// Ambil userID dari token JWT yang sudah di-set oleh Middleware
 	userID, exists := c.Get("userID")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User tidak valid"})
 		return
 	}
 
-	// 1. Cek apakah user ini Superadmin (bypass semua menu)
 	var user models.User
 	config.DB.Preload("Roles").Where("id = ?", userID).First(&user)
-	
+
 	isSuperadmin := false
 	for _, role := range user.Roles {
 		if role.Name == "Superadmin" {
@@ -31,13 +31,11 @@ func GetMyMenus(c *gin.Context) {
 	var menus []models.Menu
 
 	if isSuperadmin {
-		// Superadmin dapat semua menu
 		if err := config.DB.Where("is_active = ?", true).Order("sort_order asc").Find(&menus).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data menu"})
 			return
 		}
 	} else {
-		// 2. Query dinamis untuk user biasa (hanya ambil menu yang punya permission "read")
 		err := config.DB.Distinct("menus.*").
 			Joins("JOIN permissions ON permissions.menu_id = menus.id").
 			Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
@@ -54,7 +52,6 @@ func GetMyMenus(c *gin.Context) {
 		}
 	}
 
-	// Return daftar menu ke frontend untuk di-render di Sidebar
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Berhasil mengambil menu",
 		"data":    menus,
@@ -65,29 +62,47 @@ type MenuInput struct {
 	Name      string `json:"name" binding:"required"`
 	Path      string `json:"path" binding:"required"`
 	Icon      string `json:"icon"`
-	ParentID  *uint  `json:"parent_id"` // Menggunakan pointer agar bisa menerima null
+	ParentID  *uint  `json:"parent_id"`
 	SortOrder int    `json:"sort_order"`
-	IsActive  *bool  `json:"is_active"` // Pointer agar bisa mendeteksi nilai false yang dikirim
+	IsActive  *bool  `json:"is_active"`
 }
 
-// 1. GET ALL MENUS (Untuk tabel di Dashboard Superadmin)
-// Berbeda dengan GetMyMenus, ini akan mengambil semua menu tanpa mempedulikan Role
 func GetAllMenus(c *gin.Context) {
-	var menus []models.Menu
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+	search := c.Query("search")
 
-	// Kita ambil menu parent saja (ParentID == nil), dan kita preload SubMenus-nya
-	if err := config.DB.Where("parent_id IS NULL").Preload("SubMenus").Order("sort_order asc").Find(&menus).Error; err != nil {
+	offset := (page - 1) * limit
+	var menus []models.Menu
+	var totalItems int64
+
+	query := config.DB.Model(&models.Menu{}).Where("parent_id IS NULL")
+
+	if search != "" {
+		query = query.Where("name LIKE ?", "%"+search+"%")
+	}
+
+	query.Count(&totalItems)
+
+	if err := query.Preload("SubMenus").Order("sort_order asc").Limit(limit).Offset(offset).Find(&menus).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data menu"})
 		return
 	}
 
+	totalPages := int(math.Ceil(float64(totalItems) / float64(limit)))
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Berhasil mengambil seluruh daftar menu",
 		"data":    menus,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  totalItems,
+			"limit":        limit,
+		},
 	})
 }
 
-// 2. CREATE MENU
 func CreateMenu(c *gin.Context) {
 	var input MenuInput
 
@@ -96,7 +111,6 @@ func CreateMenu(c *gin.Context) {
 		return
 	}
 
-	// Default IsActive adalah true jika tidak dikirim dari frontend
 	isActive := true
 	if input.IsActive != nil {
 		isActive = *input.IsActive
@@ -122,7 +136,6 @@ func CreateMenu(c *gin.Context) {
 	})
 }
 
-// 3. UPDATE MENU
 func UpdateMenu(c *gin.Context) {
 	menuID := c.Param("id")
 	var input MenuInput
@@ -143,7 +156,7 @@ func UpdateMenu(c *gin.Context) {
 	menu.Icon = input.Icon
 	menu.ParentID = input.ParentID
 	menu.SortOrder = input.SortOrder
-	
+
 	if input.IsActive != nil {
 		menu.IsActive = *input.IsActive
 	}
@@ -159,7 +172,6 @@ func UpdateMenu(c *gin.Context) {
 	})
 }
 
-// 4. DELETE MENU
 func DeleteMenu(c *gin.Context) {
 	menuID := c.Param("id")
 
@@ -169,14 +181,35 @@ func DeleteMenu(c *gin.Context) {
 		return
 	}
 
-	// GORM otomatis akan melakukan cascade delete pada SubMenus dan relasi Permissions
-	// karena kita sudah set constraint OnDelete:CASCADE di models
-	if err := config.DB.Delete(&menu).Error; err != nil {
+	tx := config.DB.Begin()
+
+	if err := tx.Exec("DELETE FROM role_permissions WHERE permission_id IN (SELECT id FROM permissions WHERE menu_id = ?)", menu.ID).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membersihkan pivot role_permissions"})
+		return
+	}
+
+	if err := tx.Where("menu_id = ?", menu.ID).Delete(&models.Permission{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membersihkan hak akses (permissions)"})
+		return
+	}
+
+	if err := tx.Where("parent_id = ?", menu.ID).Delete(&models.Menu{}).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal membersihkan sub-menus"})
+		return
+	}
+
+	if err := tx.Delete(&menu).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus menu"})
 		return
 	}
 
+	tx.Commit()
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Berhasil menghapus menu",
+		"message": "Berhasil menghapus menu beserta seluruh hak akses terkait",
 	})
 }

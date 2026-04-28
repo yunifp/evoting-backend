@@ -3,36 +3,61 @@ package handlers
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/models"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-// DTO untuk input form Permission
 type PermissionInput struct {
 	MenuID      uint   `json:"menu_id" binding:"required"`
-	Name        string `json:"name" binding:"required"`   // cth: "Tambah Layanan"
-	Action      string `json:"action" binding:"required"` // cth: "create"
+	Name        string `json:"name" binding:"required"`
+	Action      string `json:"action" binding:"required"`
 	Description string `json:"description"`
 }
 
-// 1. GET ALL PERMISSIONS
 func GetPermissions(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+	search := c.Query("search")
+	actionFilter := c.Query("action")
+
+	offset := (page - 1) * limit
 	var permissions []models.Permission
-	
-	// Preload "Menu" agar di response ketahuan permission ini milik menu apa
-	if err := config.DB.Preload("Menu").Find(&permissions).Error; err != nil {
+	var totalItems int64
+
+	query := config.DB.Model(&models.Permission{})
+
+	if search != "" {
+		query = query.Where("name LIKE ? OR description LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	if actionFilter != "" {
+		query = query.Where("action = ?", actionFilter)
+	}
+
+	query.Count(&totalItems)
+
+	if err := query.Preload("Menu").Limit(limit).Offset(offset).Order("created_at desc").Find(&permissions).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data permission"})
 		return
 	}
 
+	totalPages := int(math.Ceil(float64(totalItems) / float64(limit)))
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Berhasil mengambil daftar permission",
 		"data":    permissions,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  totalItems,
+			"limit":        limit,
+		},
 	})
 }
 
-// 2. CREATE PERMISSION
 func CreatePermission(c *gin.Context) {
 	var input PermissionInput
 
@@ -41,14 +66,12 @@ func CreatePermission(c *gin.Context) {
 		return
 	}
 
-	// Cek apakah menu-nya ada
 	var menu models.Menu
 	if err := config.DB.Where("id = ?", input.MenuID).First(&menu).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Menu ID tidak valid atau tidak ditemukan"})
 		return
 	}
 
-	// Cek apakah kombinasi MenuID dan Action sudah ada (mencegah duplikat action di menu yang sama)
 	var existingPerm models.Permission
 	if err := config.DB.Where("menu_id = ? AND action = ?", input.MenuID, input.Action).First(&existingPerm).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Permission dengan aksi tersebut sudah ada pada menu ini"})
@@ -73,7 +96,6 @@ func CreatePermission(c *gin.Context) {
 	})
 }
 
-// 3. UPDATE PERMISSION
 func UpdatePermission(c *gin.Context) {
 	permID := c.Param("id")
 	var input PermissionInput
@@ -89,7 +111,6 @@ func UpdatePermission(c *gin.Context) {
 		return
 	}
 
-	// Cek menu validitas jika diubah
 	if permission.MenuID != input.MenuID {
 		var menu models.Menu
 		if err := config.DB.Where("id = ?", input.MenuID).First(&menu).Error; err != nil {
@@ -114,7 +135,6 @@ func UpdatePermission(c *gin.Context) {
 	})
 }
 
-// 4. DELETE PERMISSION
 func DeletePermission(c *gin.Context) {
 	permID := c.Param("id")
 
@@ -124,12 +144,23 @@ func DeletePermission(c *gin.Context) {
 		return
 	}
 
-	if err := config.DB.Delete(&permission).Error; err != nil {
+	tx := config.DB.Begin()
+
+	if err := tx.Exec("DELETE FROM role_permissions WHERE permission_id = ?", permission.ID).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal melepaskan permission dari role"})
+		return
+	}
+
+	if err := tx.Delete(&permission).Error; err != nil {
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menghapus permission"})
 		return
 	}
 
+	tx.Commit()
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Berhasil menghapus permission",
+		"message": "Berhasil menghapus hak akses",
 	})
 }

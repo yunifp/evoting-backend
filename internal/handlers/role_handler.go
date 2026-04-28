@@ -3,33 +3,54 @@ package handlers
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/models"
+	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-// DTO untuk input form
 type RoleInput struct {
 	Name        string `json:"name" binding:"required"`
 	Description string `json:"description"`
 }
 
-// 1. GET ALL ROLES
 func GetRoles(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "5"))
+	search := c.Query("search")
+
+	offset := (page - 1) * limit
 	var roles []models.Role
-	// Preload jika nanti ingin melihat permissions apa saja yang nempel di role ini
-	if err := config.DB.Preload("Permissions").Find(&roles).Error; err != nil {
+	var totalItems int64
+
+	query := config.DB.Model(&models.Role{})
+
+	if search != "" {
+		query = query.Where("name LIKE ? OR description LIKE ?", "%"+search+"%", "%"+search+"%")
+	}
+
+	query.Count(&totalItems)
+
+	if err := query.Preload("Permissions").Limit(limit).Offset(offset).Order("created_at desc").Find(&roles).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data role"})
 		return
 	}
 
+	totalPages := int(math.Ceil(float64(totalItems) / float64(limit)))
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Berhasil mengambil daftar role",
 		"data":    roles,
+		"meta": gin.H{
+			"current_page": page,
+			"total_pages":  totalPages,
+			"total_items":  totalItems,
+			"limit":        limit,
+		},
 	})
 }
 
-// 2. CREATE ROLE
 func CreateRole(c *gin.Context) {
 	var input RoleInput
 
@@ -38,7 +59,6 @@ func CreateRole(c *gin.Context) {
 		return
 	}
 
-	// Cek apakah nama role sudah ada
 	var existingRole models.Role
 	if err := config.DB.Where("name = ?", input.Name).First(&existingRole).Error; err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "Nama role sudah digunakan"})
@@ -61,7 +81,6 @@ func CreateRole(c *gin.Context) {
 	})
 }
 
-// 3. UPDATE ROLE
 func UpdateRole(c *gin.Context) {
 	roleID := c.Param("id")
 	var input RoleInput
@@ -77,7 +96,6 @@ func UpdateRole(c *gin.Context) {
 		return
 	}
 
-	// Proteksi: Superadmin tidak boleh diubah namanya
 	if role.Name == "Superadmin" && input.Name != "Superadmin" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Nama role Superadmin tidak boleh diubah"})
 		return
@@ -97,7 +115,6 @@ func UpdateRole(c *gin.Context) {
 	})
 }
 
-// 4. DELETE ROLE
 func DeleteRole(c *gin.Context) {
 	roleID := c.Param("id")
 
@@ -107,10 +124,8 @@ func DeleteRole(c *gin.Context) {
 		return
 	}
 
-	// Proteksi: Role core (Superadmin, Admin, Client, Voter) sebaiknya tidak bisa dihapus sembarangan, 
-	// tapi minimal Superadmin wajib di-lock.
-	if role.Name == "Superadmin" {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Role Superadmin tidak boleh dihapus"})
+	if role.Name == "Superadmin" || role.Name == "Admin" || role.Name == "Client" || role.Name == "Voter" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Role inti sistem tidak boleh dihapus"})
 		return
 	}
 
@@ -124,12 +139,10 @@ func DeleteRole(c *gin.Context) {
 	})
 }
 
-// DTO untuk input form Assign Permission
 type AssignPermissionsInput struct {
 	PermissionIDs []uint `json:"permission_ids" binding:"required"`
 }
 
-// 5. ASSIGN PERMISSIONS TO ROLE
 func AssignPermissions(c *gin.Context) {
 	roleID := c.Param("id")
 	var input AssignPermissionsInput
@@ -139,21 +152,17 @@ func AssignPermissions(c *gin.Context) {
 		return
 	}
 
-	// Cari role-nya
 	var role models.Role
 	if err := config.DB.Where("id = ?", roleID).First(&role).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Role tidak ditemukan"})
 		return
 	}
 
-	// Proteksi: Superadmin sebaiknya tidak bisa di-revoke hak aksesnya lewat endpoint ini 
-	// (agar tidak ada admin iseng yang melumpuhkan Superadmin)
 	if role.Name == "Superadmin" {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Hak akses Superadmin bersifat absolut dan tidak dapat diubah"})
 		return
 	}
 
-	// Cari daftar permission berdasarkan array ID yang dikirim
 	var permissions []models.Permission
 	if len(input.PermissionIDs) > 0 {
 		if err := config.DB.Where("id IN ?", input.PermissionIDs).Find(&permissions).Error; err != nil {
@@ -162,7 +171,6 @@ func AssignPermissions(c *gin.Context) {
 		}
 	}
 
-	// Replace asosiasi (GORM otomatis menghapus yang tidak ada di list, dan menambahkan yang baru)
 	if err := config.DB.Model(&role).Association("Permissions").Replace(permissions); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal menetapkan hak akses ke role"})
 		return

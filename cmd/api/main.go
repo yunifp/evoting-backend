@@ -7,31 +7,28 @@ import (
 	"evoting-backend/internal/seeders"
 	"log"
 	"os"
-	"time" 
+	"time"
 
-	"github.com/gin-contrib/cors" 
-
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
 	config.ConnectDatabase()
 	seeders.RunSeeder(config.DB)
-	
+
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"http://localhost:3000", "http://127.0.0.1:3000"},
-		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders: []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Accept", "X-Requested-With"},
-		ExposeHeaders: []string{"Content-Length"},
+		AllowOrigins:     []string{"http://localhost:3000", "http://127.0.0.1:3000"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Length", "Content-Type", "Authorization", "Accept", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
-		MaxAge: 12 * time.Hour,
+		MaxAge:           12 * time.Hour,
 	}))
-	
+
 	router.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong! Server Golang siap untuk E-Voting.",
-		})
+		c.JSON(200, gin.H{"message": "pong! Server Golang siap untuk E-Voting."})
 	})
 
 	api := router.Group("/api")
@@ -48,17 +45,16 @@ func main() {
 			menuGroup.GET("/me", handlers.GetMyMenus)
 		}
 
-		
 		clientGroup := api.Group("/client")
 		clientGroup.Use(middlewares.RequireAuth())
 		{
-			clientGroup.GET("/layanan", handlers.GetLayanan) 
+			clientGroup.GET("/layanan", handlers.GetLayanan)
 			clientGroup.POST("/transactions", handlers.CreateTransaction)
 			clientGroup.GET("/transactions/me", handlers.GetMyTransactions)
 			clientGroup.GET("/pemilu", handlers.GetMyPemilu)
 			clientGroup.POST("/pemilu", handlers.CreatePemilu)
-			clientGroup.POST("/pemilu/:pemiluId/kandidat", handlers.AddKandidat) 
-			clientGroup.DELETE("/kandidat/:id", handlers.DeleteKandidat) 
+			clientGroup.POST("/pemilu/:pemiluId/kandidat", handlers.AddKandidat)
+			clientGroup.DELETE("/kandidat/:id", handlers.DeleteKandidat)
 			clientGroup.POST("/pemilu/:pemiluId/dpt", handlers.AddDPT)
 			clientGroup.GET("/pemilu/:pemiluId/dpt", handlers.GetDPTByPemilu)
 		}
@@ -66,10 +62,15 @@ func main() {
 		admin := api.Group("/admin")
 		admin.Use(middlewares.RequireAuth())
 		{
-			admin.PUT("/clients/:id/approve",
-				middlewares.RequirePermission("Manajemen Client", "approve"),
-				handlers.ApproveClient,
-			)
+			usersGroup := admin.Group("/users")
+			{
+				usersGroup.GET("", middlewares.RequirePermission("Manajemen Pengguna", "read"), handlers.GetUsers)
+				usersGroup.POST("", middlewares.RequirePermission("Manajemen Pengguna", "create"), handlers.CreateUser)
+				usersGroup.PUT("/:id", middlewares.RequirePermission("Manajemen Pengguna", "update"), handlers.UpdateUser)
+				usersGroup.PATCH("/:id/approve", middlewares.RequirePermission("Manajemen Pengguna", "approve"), handlers.ApproveUser)
+				usersGroup.PATCH("/:id/toggle-status", middlewares.RequirePermission("Manajemen Pengguna", "update"), handlers.ToggleUserStatus)
+				usersGroup.DELETE("/:id", middlewares.RequirePermission("Manajemen Pengguna", "delete"), handlers.DeleteUser)
+			}
 
 			roles := admin.Group("/roles")
 			{
@@ -111,7 +112,7 @@ func main() {
 			}
 		}
 	}
-	
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"

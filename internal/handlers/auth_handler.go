@@ -87,10 +87,10 @@ func Login(c *gin.Context) {
 
     // 2. Cari User beserta Roles dan Permissions-nya (UPDATE DI SINI)
     var user models.User
-    if err := config.DB.Preload("Roles.Permissions").Where("email = ?", input.Email).First(&user).Error; err != nil {
-        c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau password salah"})
-        return
-    }
+    if err := config.DB.Preload("Roles.Permissions.Menu").Where("email = ?", input.Email).First(&user).Error; err != nil {
+    c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau password salah"})
+    return
+	}
 
     // 3. Verifikasi Password
     if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
