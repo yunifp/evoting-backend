@@ -60,6 +60,10 @@ func main() {
 			clientGroup.POST("/pemilu/:pemiluId/kandidat", handlers.AddKandidat)
 			clientGroup.DELETE("/kandidat/:id", handlers.DeleteKandidat)
 			clientGroup.GET("/pemilu/:pemiluId", handlers.GetPemiluDetail)
+			clientGroup.PUT("/pemilu/:pemiluId", handlers.UpdatePemilu)
+			clientGroup.DELETE("/pemilu/:pemiluId", handlers.DeletePemilu)
+			clientGroup.PATCH("/pemilu/:pemiluId/close", handlers.ClosePemilu)
+			clientGroup.GET("/pemilu/available-packages", handlers.GetAvailablePackages) // <-- TAMBAHKAN BARIS INI
 			clientGroup.POST("/pemilu/:pemiluId/dpt", handlers.AddDPT)
 			clientGroup.GET("/pemilu/:pemiluId/dpt", handlers.GetDPTByPemilu)
 			clientGroup.PATCH("/pemilu/:pemiluId/publish", handlers.PublishPemilu)
