@@ -9,7 +9,7 @@ import (
 )
 
 func ApproveClient(c *gin.Context) {
-	clientID := c.Param("id") // Ambil ID dari URL (contoh: /api/admin/clients/:id/approve)
+	clientID := c.Param("id") 
 
 	var user models.User
 	if err := config.DB.Where("id = ?", clientID).First(&user).Error; err != nil {

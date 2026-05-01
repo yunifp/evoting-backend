@@ -1,11 +1,9 @@
-// cmd/api/main.go
 package main
 
 import (
 	"evoting-backend/internal/config"
 	"evoting-backend/internal/handlers"
 	"evoting-backend/internal/middlewares"
-	"evoting-backend/internal/seeders"
 	"log"
 	"os"
 	"time"
@@ -16,8 +14,6 @@ import (
 
 func main() {
 	config.ConnectDatabase()
-	seeders.RunSeeder(config.DB)
-	seeders.SeedDummyData(config.DB)
 
 	router := gin.Default()
 	router.Use(cors.New(cors.Config{
@@ -49,10 +45,20 @@ func main() {
 			menuGroup.GET("/me", handlers.GetMyMenus)
 		}
 
+		masterData := api.Group("/master")
+		{
+			masterData.GET("/provinsi", handlers.GetProvinsi)
+			masterData.GET("/kabupaten", handlers.GetKabupaten)
+			masterData.GET("/kecamatan", handlers.GetKecamatan)
+			masterData.GET("/kelurahan", handlers.GetKelurahan)
+			masterData.GET("/status-kawin", handlers.GetStatusKawin)
+		}
+
 		clientGroup := api.Group("/client")
 		clientGroup.Use(middlewares.RequireAuth())
 		{
 			clientGroup.GET("/layanan", handlers.GetLayanan)
+			clientGroup.GET("/layanan/status", handlers.GetMyLayananStatus)
 			clientGroup.POST("/transactions", handlers.CreateTransaction)
 			clientGroup.GET("/transactions/me", handlers.GetMyTransactions)
 			clientGroup.GET("/pemilu", handlers.GetMyPemilu)
@@ -63,7 +69,7 @@ func main() {
 			clientGroup.PUT("/pemilu/:pemiluId", handlers.UpdatePemilu)
 			clientGroup.DELETE("/pemilu/:pemiluId", handlers.DeletePemilu)
 			clientGroup.PATCH("/pemilu/:pemiluId/close", handlers.ClosePemilu)
-			clientGroup.GET("/pemilu/available-packages", handlers.GetAvailablePackages) // <-- TAMBAHKAN BARIS INI
+			clientGroup.GET("/pemilu/available-packages", handlers.GetAvailablePackages)
 			clientGroup.POST("/pemilu/:pemiluId/dpt", handlers.AddDPT)
 			clientGroup.GET("/pemilu/:pemiluId/dpt", handlers.GetDPTByPemilu)
 			clientGroup.PATCH("/pemilu/:pemiluId/publish", handlers.PublishPemilu)

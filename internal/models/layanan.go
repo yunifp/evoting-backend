@@ -10,7 +10,7 @@ type Layanan struct {
     LimitDPT          int       `gorm:"not null" json:"limit_dpt"`             
     Price             float64   `gorm:"type:decimal(15,2)" json:"price"`        
     Features          string    `gorm:"type:text" json:"features"`              
-    IsFaceRecognition bool      `gorm:"default:false" json:"is_face_recognition"` // TAMBAHAN: Penentu fitur face recognition
+    IsFaceRecognition bool      `gorm:"default:false" json:"is_face_recognition"` 
     IsActive          bool      `gorm:"default:true" json:"is_active"`
     CreatedAt         time.Time `json:"created_at"`
     UpdatedAt         time.Time `json:"updated_at"`

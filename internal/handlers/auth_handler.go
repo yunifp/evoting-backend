@@ -79,26 +79,26 @@ func Register(c *gin.Context) {
 func Login(c *gin.Context) {
     var input LoginInput
 
-    // 1. Validasi Input JSON
+
     if err := c.ShouldBindJSON(&input); err != nil {
         c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
         return
     }
 
-    // 2. Cari User beserta Roles dan Permissions-nya (UPDATE DI SINI)
+   
     var user models.User
     if err := config.DB.Preload("Roles.Permissions.Menu").Where("email = ?", input.Email).First(&user).Error; err != nil {
     c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau password salah"})
     return
 	}
 
-    // 3. Verifikasi Password
+
     if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
         c.JSON(http.StatusUnauthorized, gin.H{"error": "Email atau password salah"})
         return
     }
 
-    // 4. Cek Status Approval & Active (Khusus Superadmin, bebas hambatan)
+
     isSuperadmin := false
     for _, role := range user.Roles {
         if role.Name == "Superadmin" {
@@ -118,15 +118,13 @@ func Login(c *gin.Context) {
         }
     }
 
-    // 5. Generate JWT Token
+
     token, err := utils.GenerateJWT(user.ID, user.Email)
     if err != nil {
         c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal men-generate token"})
         return
     }
 
-    // 6. Return Data (Sembunyikan Password)
-    // Array permissions akan otomatis ikut di dalam user.Roles karena kita sudah Preload
     c.JSON(http.StatusOK, gin.H{
         "message": "Login berhasil",
         "token":   token,

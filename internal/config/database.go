@@ -1,4 +1,3 @@
-// internal/config/database.go
 package config
 
 import (
@@ -50,6 +49,7 @@ func ConnectDatabase() {
 		&models.Kandidat{},
 		&models.DPT{},
 		&models.Setting{},
+		&models.StatusKawin{},
 	)
 	if err != nil {
 		log.Fatal("Gagal melakukan migrasi database: ", err)
