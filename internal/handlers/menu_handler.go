@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 func GetMyMenus(c *gin.Context) {
@@ -31,11 +32,14 @@ func GetMyMenus(c *gin.Context) {
 	var menus []models.Menu
 
 	if isSuperadmin {
-		if err := config.DB.Where("is_active = ?", true).Order("sort_order asc").Find(&menus).Error; err != nil {
+		if err := config.DB.Preload("SubMenus", func(db *gorm.DB) *gorm.DB {
+			return db.Where("is_active = ?", true).Order("sort_order asc")
+		}).Where("is_active = ? AND parent_id IS NULL", true).Order("sort_order asc").Find(&menus).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data menu"})
 			return
 		}
 	} else {
+		var flatMenus []models.Menu
 		err := config.DB.Distinct("menus.*").
 			Joins("JOIN permissions ON permissions.menu_id = menus.id").
 			Joins("JOIN role_permissions ON role_permissions.permission_id = permissions.id").
@@ -44,11 +48,31 @@ func GetMyMenus(c *gin.Context) {
 			Where("permissions.action = ?", "read").
 			Where("menus.is_active = ?", true).
 			Order("menus.sort_order asc").
-			Find(&menus).Error
+			Find(&flatMenus).Error
 
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data menu"})
 			return
+		}
+
+		menuMap := make(map[uint]*models.Menu)
+		for i := range flatMenus {
+			flatMenus[i].SubMenus = []models.Menu{}
+			menuMap[flatMenus[i].ID] = &flatMenus[i]
+		}
+
+		for _, menu := range flatMenus {
+			if menu.ParentID != nil {
+				if parent, exists := menuMap[*menu.ParentID]; exists {
+					parent.SubMenus = append(parent.SubMenus, *menuMap[menu.ID])
+				}
+			}
+		}
+
+		for _, menu := range flatMenus {
+			if menu.ParentID == nil {
+				menus = append(menus, *menuMap[menu.ID])
+			}
 		}
 	}
 
@@ -60,7 +84,7 @@ func GetMyMenus(c *gin.Context) {
 
 type MenuInput struct {
 	Name      string `json:"name" binding:"required"`
-	Path      string `json:"path" binding:"required"`
+	Path      string `json:"path"`
 	Icon      string `json:"icon"`
 	ParentID  *uint  `json:"parent_id"`
 	SortOrder int    `json:"sort_order"`
@@ -84,7 +108,9 @@ func GetAllMenus(c *gin.Context) {
 
 	query.Count(&totalItems)
 
-	if err := query.Preload("SubMenus").Order("sort_order asc").Limit(limit).Offset(offset).Find(&menus).Error; err != nil {
+	if err := query.Preload("SubMenus", func(db *gorm.DB) *gorm.DB {
+		return db.Order("sort_order asc")
+	}).Order("sort_order asc").Limit(limit).Offset(offset).Find(&menus).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Gagal mengambil data menu"})
 		return
 	}

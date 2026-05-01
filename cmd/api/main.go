@@ -16,6 +16,10 @@ func main() {
 	config.ConnectDatabase()
 
 	router := gin.Default()
+
+	// Menambahkan static route agar frontend bisa mengakses folder uploads
+	router.Static("/uploads", "./uploads")
+
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173", "http://127.0.0.1:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -63,7 +67,6 @@ func main() {
 			clientGroup.GET("/transactions/me", handlers.GetMyTransactions)
 			clientGroup.GET("/pemilu", handlers.GetMyPemilu)
 			clientGroup.POST("/pemilu", handlers.CreatePemilu)
-			clientGroup.POST("/pemilu/:pemiluId/kandidat", handlers.AddKandidat)
 			clientGroup.DELETE("/kandidat/:id", handlers.DeleteKandidat)
 			clientGroup.GET("/pemilu/:pemiluId", handlers.GetPemiluDetail)
 			clientGroup.PUT("/pemilu/:pemiluId", handlers.UpdatePemilu)
@@ -73,6 +76,8 @@ func main() {
 			clientGroup.POST("/pemilu/:pemiluId/dpt", handlers.AddDPT)
 			clientGroup.GET("/pemilu/:pemiluId/dpt", handlers.GetDPTByPemilu)
 			clientGroup.PATCH("/pemilu/:pemiluId/publish", handlers.PublishPemilu)
+			clientGroup.POST("/pemilu/:pemiluId/kandidat", middlewares.UploadFile("photo", "uploads/kandidat"), handlers.AddKandidat)
+			clientGroup.PUT("/kandidat/:id", middlewares.UploadFile("photo", "uploads/kandidat"), handlers.UpdateKandidat)
 			clientGroup.GET("/settings/midtrans", handlers.GetMidtransConfig)
 		}
 
